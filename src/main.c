@@ -489,10 +489,7 @@ static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
 			tx->len++;
 		}
 
-		err = uart_tx(uart, tx->data, tx->len, SYS_FOREVER_MS);
-		if (err) {
-			k_fifo_put(&fifo_uart_tx_data, tx);
-		}
+        k_fifo_put(&fifo_uart_rx_data, tx);
 	}
 }
 
