@@ -1,6 +1,10 @@
 #include "device_identification.h"
 #include <zephyr/posix/arpa/inet.h>
+#include <hal/nrf_gpio.h>
 #include "protocol.h"
+
+#define HEATER_PIN  23
+#define MOTOR_PIN   14
 
 static ProtocolHandler set_heater_handler, set_motor_handler;
 static ProtocolHandler set_measure_handler, set_pattern_hander, set_level_hander;
@@ -18,6 +22,11 @@ int set_heater(ProtocolDataUnit *pdu)
         return -2;
     }
     is_heating = (bool)on_off;
+    if (is_heating) {
+	    nrf_gpio_pin_set(HEATER_PIN);
+    } else {
+	    nrf_gpio_pin_clear(HEATER_PIN);
+    }
     return 0;
 }
 
@@ -31,6 +40,11 @@ int set_motor(ProtocolDataUnit *pdu)
         return -2;
     }
     is_vibrating = (bool)on_off;
+    if (is_vibrating) {
+	    nrf_gpio_pin_set(MOTOR_PIN);
+    } else {
+	    nrf_gpio_pin_clear(MOTOR_PIN);
+    }
     return 0;
 }
 
@@ -44,6 +58,13 @@ int set_measure(ProtocolDataUnit *pdu)
         return -2;
     }
     is_measuring = (bool)on_off;
+    if (is_measuring) {
+        extern void start_measure(void);
+        start_measure();
+    } else {
+        extern void stop_measure(void);
+        stop_measure();
+    }
     return 0;
 }
 

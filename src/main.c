@@ -363,6 +363,29 @@ void main(void)
 	}
 }
 
+void measure(struct k_timer *dummy)
+{
+    uint8_t data[] = {0x11, 0xEE, 0x30, 0xCF};
+    bt_receive_cb(NULL, data, sizeof(data));
+}
+
+K_TIMER_DEFINE(measure_timer, measure, NULL);
+
+void start_measure(void)
+{
+    k_timer_start(&measure_timer, K_MSEC(0), K_MSEC(33));
+}
+
+void stop_measure(void)
+{
+    k_timer_stop(&measure_timer);
+}
+
+int measure_handler(ProtocolDataUnit *pdu)
+{
+    return 0;
+}
+
 void ble_write_thread(void)
 {
 	/* Don't go any further until BLE is initialized */
@@ -371,6 +394,13 @@ void ble_write_thread(void)
     DeviceIdentification_init();
     OperationCommand_init();
     SettingCommand_init();
+    Protocol_set_handler(
+        COMMAND_MEASURED_DATA, 
+        &(ProtocolHandler) {
+            .command = 0x11EE,
+            .handler = measure_handler
+        }
+    );
 
 	for (;;) {
 		/* Wait indefinitely for data to be sent over bluetooth */
