@@ -32,6 +32,8 @@
 
 #include "protocol.h"
 #include "device_identification.h"
+#include "operation_command.h"
+#include "setting_command.h"
 
 #define LOG_MODULE_NAME peripheral_uart
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -367,6 +369,8 @@ void ble_write_thread(void)
 	k_sem_take(&ble_init_ok, K_FOREVER);
 
     DeviceIdentification_init();
+    OperationCommand_init();
+    SettingCommand_init();
 
 	for (;;) {
 		/* Wait indefinitely for data to be sent over bluetooth */

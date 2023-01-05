@@ -2,8 +2,8 @@
 #include <zephyr/posix/arpa/inet.h>
 #include "protocol.h"
 
-static uint16_t login_id;
 static ProtocolHandler id_setting_handler, id_confirm_handler;
+static uint16_t login_id;
 
 int setting(ProtocolDataUnit *pdu)
 {
@@ -22,7 +22,7 @@ int confirm(ProtocolDataUnit *pdu)
     uint16_t *response = (uint16_t *)pdu->params;
     if (*response) {
         // must be empty on received
-        return -1;
+        return -2;
     }
     *response = HTON_UINT16(&login_id);
     return 0;
