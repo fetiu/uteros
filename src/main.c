@@ -30,6 +30,9 @@
 
 #include <zephyr/logging/log.h>
 
+#include "protocol.h"
+#include "device_identification.h"
+
 #define LOG_MODULE_NAME peripheral_uart
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
@@ -363,15 +366,23 @@ void ble_write_thread(void)
 	/* Don't go any further until BLE is initialized */
 	k_sem_take(&ble_init_ok, K_FOREVER);
 
+    DeviceIdentification_init();
+
 	for (;;) {
 		/* Wait indefinitely for data to be sent over bluetooth */
-		struct bt_data_t *buf = k_fifo_get(&fifo_bt_data,
-						     K_FOREVER);
-
+		struct bt_data_t *buf = k_fifo_get(&fifo_bt_data, K_FOREVER);
+        ProtocolDataUnit *pdu = Protocol_new_pdu(buf->data, buf->len);
+        if (!pdu) {
+            goto cleanup;
+        }
+        if (Protocol_handle(pdu)) {
+            goto cleanup;
+        }
 		if (bt_nus_send(NULL, buf->data, buf->len)) {
 			LOG_WRN("Failed to send data over BLE connection");
 		}
-
+cleanup:
+        Protocol_delete_pdu(pdu);
 		k_free(buf);
 	}
 }
