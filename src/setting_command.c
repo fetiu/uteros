@@ -98,6 +98,10 @@ int set_level(ProtocolDataUnit *pdu)
 void SettingCommand_init(void)
 {
     is_heating = is_vibrating = is_measuring = false;
+    nrf_gpio_cfg_output(HEATER_PIN);
+	nrf_gpio_cfg_output(MOTOR_PIN);
+	nrf_gpio_pin_clear(HEATER_PIN);
+	nrf_gpio_pin_clear(MOTOR_PIN);
 
     set_heater_handler.command = 0x10EF;
     set_heater_handler.handler = set_heater;

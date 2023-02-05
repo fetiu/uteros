@@ -109,7 +109,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	if (current_conn) {
 		bt_conn_unref(current_conn);
 		current_conn = NULL;
-		dk_set_led_off(CON_STATUS_LED);
+		// dk_set_led_off(CON_STATUS_LED);
 	}
 }
 
@@ -254,7 +254,7 @@ static struct bt_nus_cb nus_cb = {
 
 void error(void)
 {
-	dk_set_leds_state(DK_ALL_LEDS_MSK, DK_NO_LEDS_MSK);
+	// dk_set_leds_state(DK_ALL_LEDS_MSK, DK_NO_LEDS_MSK);
 
 	while (true) {
 		/* Spin for ever */
