@@ -1,0 +1,6 @@
+[submodule "deps/BMP180_driver"]
+	path = deps/BMP180_driver
+	url = git@github.com:boschsensortec/BMP180_driver.git
+[submodule "deps/BMP2-Sensor-API"]
+	path = deps/BMP2-Sensor-API
+	url = https://github.com/boschsensortec/BMP2-Sensor-API
