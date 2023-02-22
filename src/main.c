@@ -10,29 +10,28 @@
 #include "uart_async_adapter.h"
 
 #include <zephyr/types.h>
-#include <zephyr.h>
-#include <drivers/uart.h>
-#include <usb/usb_device.h>
+#include <zephyr/kernel.h>
+#include <zephyr/drivers/uart.h>
+#include <zephyr/usb/usb_device.h>
 
-#include <device.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <soc.h>
 
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/uuid.h>
-#include <bluetooth/gatt.h>
-#include <bluetooth/hci.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/hci.h>
 
 #include <bluetooth/services/nus.h>
 
 #include <dk_buttons_and_leds.h>
 
-#include <settings/settings.h>
+#include <zephyr/settings/settings.h>
 
 #include <stdio.h>
 
-#include <logging/log.h>
-
-#include <hal/nrf_gpio.h>
+#include <zephyr/logging/log.h>
 
 #define LOG_MODULE_NAME peripheral_uart
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
@@ -57,10 +56,10 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 static K_SEM_DEFINE(ble_init_ok, 0, 1);
 
-static struct bt_conn *current_conn = NULL;
+static struct bt_conn *current_conn;
 static struct bt_conn *auth_conn;
 
-static const struct device *uart;
+static const struct device *uart = DEVICE_DT_GET(DT_CHOSEN(nordic_nus_uart));
 static struct k_work_delayable uart_work;
 
 struct uart_data_t {
@@ -91,15 +90,14 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 {
 	ARG_UNUSED(dev);
 
-	static uint8_t *current_buf;
 	static size_t aborted_len;
-	static bool buf_release;
 	struct uart_data_t *buf;
 	static uint8_t *aborted_buf;
+	static bool disable_req;
 
 	switch (evt->type) {
 	case UART_TX_DONE:
-		LOG_DBG("tx_done");
+		LOG_DBG("UART_TX_DONE");
 		if ((evt->data.tx.len == 0) ||
 		    (!evt->data.tx.buf)) {
 			return;
@@ -129,25 +127,26 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 		break;
 
 	case UART_RX_RDY:
-		LOG_DBG("rx_rdy");
+		LOG_DBG("UART_RX_RDY");
 		buf = CONTAINER_OF(evt->data.rx.buf, struct uart_data_t, data);
 		buf->len += evt->data.rx.len;
-		buf_release = false;
 
-		if (buf->len == UART_BUF_SIZE) {
-			k_fifo_put(&fifo_uart_rx_data, buf);
-		} else if ((evt->data.rx.buf[buf->len - 1] == '\n') ||
-			  (evt->data.rx.buf[buf->len - 1] == '\r')) {
-			k_fifo_put(&fifo_uart_rx_data, buf);
-			current_buf = evt->data.rx.buf;
-			buf_release = true;
+		if (disable_req) {
+			return;
+		}
+
+		if ((evt->data.rx.buf[buf->len - 1] == '\n') ||
+		    (evt->data.rx.buf[buf->len - 1] == '\r')) {
+			disable_req = true;
 			uart_rx_disable(uart);
 		}
 
 		break;
 
 	case UART_RX_DISABLED:
-		LOG_DBG("rx_disabled");
+		LOG_DBG("UART_RX_DISABLED");
+		disable_req = false;
+
 		buf = k_malloc(sizeof(*buf));
 		if (buf) {
 			buf->len = 0;
@@ -163,7 +162,7 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 		break;
 
 	case UART_RX_BUF_REQUEST:
-		LOG_DBG("rx_buf_request");
+		LOG_DBG("UART_RX_BUF_REQUEST");
 		buf = k_malloc(sizeof(*buf));
 		if (buf) {
 			buf->len = 0;
@@ -175,29 +174,30 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
 		break;
 
 	case UART_RX_BUF_RELEASED:
-		LOG_DBG("rx_buf_released");
+		LOG_DBG("UART_RX_BUF_RELEASED");
 		buf = CONTAINER_OF(evt->data.rx_buf.buf, struct uart_data_t,
 				   data);
-		if (buf_release && (current_buf != evt->data.rx_buf.buf)) {
+
+		if (buf->len > 0) {
+			k_fifo_put(&fifo_uart_rx_data, buf);
+		} else {
 			k_free(buf);
-			buf_release = false;
-			current_buf = NULL;
 		}
 
 		break;
 
 	case UART_TX_ABORTED:
-			LOG_DBG("tx_aborted");
-			if (!aborted_buf) {
-				aborted_buf = (uint8_t *)evt->data.tx.buf;
-			}
+		LOG_DBG("UART_TX_ABORTED");
+		if (!aborted_buf) {
+			aborted_buf = (uint8_t *)evt->data.tx.buf;
+		}
 
-			aborted_len += evt->data.tx.len;
-			buf = CONTAINER_OF(aborted_buf, struct uart_data_t,
-					   data);
+		aborted_len += evt->data.tx.len;
+		buf = CONTAINER_OF(aborted_buf, struct uart_data_t,
+				   data);
 
-			uart_tx(uart, &buf->data[aborted_len],
-				buf->len - aborted_len, SYS_FOREVER_MS);
+		uart_tx(uart, &buf->data[aborted_len],
+			buf->len - aborted_len, SYS_FOREVER_MS);
 
 		break;
 
@@ -237,14 +237,13 @@ static int uart_init(void)
 	struct uart_data_t *rx;
 	struct uart_data_t *tx;
 
-	uart = device_get_binding(CONFIG_BT_NUS_UART_DEV);
-	if (!uart) {
-		return -ENXIO;
+	if (!device_is_ready(uart)) {
+		return -ENODEV;
 	}
 
 	if (IS_ENABLED(CONFIG_USB_DEVICE_STACK)) {
 		err = usb_enable(NULL);
-		if (err) {
+		if (err && (err != -EALREADY)) {
 			LOG_ERR("Failed to enable USB");
 			return err;
 		}
@@ -331,11 +330,11 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-	LOG_INF("Connected %s", log_strdup(addr));
+	LOG_INF("Connected %s", addr);
 
 	current_conn = bt_conn_ref(conn);
 
-	//dk_set_led_on(CON_STATUS_LED);
+	dk_set_led_on(CON_STATUS_LED);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -344,7 +343,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_INF("Disconnected: %s (reason %u)", log_strdup(addr), reason);
+	LOG_INF("Disconnected: %s (reason %u)", addr, reason);
 
 	if (auth_conn) {
 		bt_conn_unref(auth_conn);
@@ -354,7 +353,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	if (current_conn) {
 		bt_conn_unref(current_conn);
 		current_conn = NULL;
-		//dk_set_led_off(CON_STATUS_LED);
+		dk_set_led_off(CON_STATUS_LED);
 	}
 }
 
@@ -367,10 +366,9 @@ static void security_changed(struct bt_conn *conn, bt_security_t level,
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	if (!err) {
-		LOG_INF("Security changed: %s level %u", log_strdup(addr),
-			level);
+		LOG_INF("Security changed: %s level %u", addr, level);
 	} else {
-		LOG_WRN("Security failed: %s level %u err %d", log_strdup(addr),
+		LOG_WRN("Security failed: %s level %u err %d", addr,
 			level, err);
 	}
 }
@@ -391,7 +389,7 @@ static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_INF("Passkey for %s: %06u", log_strdup(addr), passkey);
+	LOG_INF("Passkey for %s: %06u", addr, passkey);
 }
 
 static void auth_passkey_confirm(struct bt_conn *conn, unsigned int passkey)
@@ -402,9 +400,10 @@ static void auth_passkey_confirm(struct bt_conn *conn, unsigned int passkey)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_INF("Passkey for %s: %06u", log_strdup(addr), passkey);
+	LOG_INF("Passkey for %s: %06u", addr, passkey);
 	LOG_INF("Press Button 1 to confirm, Button 2 to reject.");
 }
+
 
 static void auth_cancel(struct bt_conn *conn)
 {
@@ -412,8 +411,9 @@ static void auth_cancel(struct bt_conn *conn)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_INF("Pairing cancelled: %s", log_strdup(addr));
+	LOG_INF("Pairing cancelled: %s", addr);
 }
+
 
 static void pairing_complete(struct bt_conn *conn, bool bonded)
 {
@@ -421,9 +421,9 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_INF("Pairing completed: %s, bonded: %d", log_strdup(addr),
-		bonded);
+	LOG_INF("Pairing completed: %s, bonded: %d", addr, bonded);
 }
+
 
 static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 {
@@ -431,219 +431,34 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-	LOG_INF("Pairing failed conn: %s, reason %d", log_strdup(addr),
-		reason);
+	LOG_INF("Pairing failed conn: %s, reason %d", addr, reason);
 }
+
 
 static struct bt_conn_auth_cb conn_auth_callbacks = {
 	.passkey_display = auth_passkey_display,
 	.passkey_confirm = auth_passkey_confirm,
 	.cancel = auth_cancel,
+};
+
+static struct bt_conn_auth_info_cb conn_auth_info_callbacks = {
 	.pairing_complete = pairing_complete,
 	.pairing_failed = pairing_failed
 };
 #else
 static struct bt_conn_auth_cb conn_auth_callbacks;
+static struct bt_conn_auth_info_cb conn_auth_info_callbacks;
 #endif
 
-static uint16_t data2uint16(uint8_t *data)
-{
-	uint16_t val;
-
-	val = data[0];
-	val <<= 8;
-	val |= data[1];
-
-	return val;
-}
-
-static void motor_on(void)
-{
-	nrf_gpio_pin_set(14);
-}
-
-static void motor_off(void)
-{
-	nrf_gpio_pin_clear(14);
-}
-
-static void heater_on(void)
-{
-	nrf_gpio_pin_set(23);
-}
-
-static void heater_off(void)
-{
-	nrf_gpio_pin_clear(23);
-}
-
-static uint32_t m_pressure_out_flag = false;
-static uint32_t m_state_time = 0;
-
-static uint8_t  m_id[8];
-
-#define MO_PATTERN_1_ON		(1)
-#define MO_PATTERN_1_OFF	(1)
-
-#define MO_PATTERN_2_ON		(2)
-#define MO_PATTERN_2_OFF	(1)
-
-#define MO_PATTERN_3_ON		(3)
-#define MO_PATTERN_3_OFF	(1)
-
-#define MO_PATTERN_4_ON		(4)
-#define MO_PATTERN_4_OFF	(1)
-
-static void set_motor_pattern(uint32_t on, uint32_t off);
-
-typedef enum {
-	MOTOR_ON = 0,
-	MOTOR_OFF,
-} en_motor_state_t;
-
-static en_motor_state_t m_motor_state = MOTOR_OFF;
-
-static uint32_t m_motor_pattern_on = 0;
-static uint32_t m_motor_pattern_off = 0;
-
-static uint32_t m_running_flag = false;
-
-static void write_flash_data(uint8_t *data, int len);
-static void read_flash_data(uint8_t *buff, int len);
-
-static void start_motor(void);
-static void stop_motor(void);
-
-static uint8_t m_buff[32];
-static uint8_t m_response[32];
-
-static void send_response(uint8_t *data, uint16_t size)
-{
-	bt_nus_send(current_conn, data, size);
-}
-
-static void app_handle(uint8_t *data, uint16_t len)
-{
-	uint16_t code;
-	uint16_t param;
-
-	code = data2uint16(data);
-	param = data2uint16(data + 2);
-
-	switch (code)
-	{
-		/* ID Setting */
-		case 0x55AA:
-			m_buff[0] = data[2];
-			m_buff[1] = data[3];
-			m_buff[2] = data[4];
-			m_buff[3] = data[5];
-			write_flash_data(m_buff, 4);
-
-
-			m_response[0] = 0xAA;
-			m_response[1] = 0x55;
-			m_response[2] = data[2];
-			m_response[3] = data[3];
-			m_response[4] = data[4];
-			m_response[5] = data[5];
-			send_response(m_response, 6);
-			break;
-
-		/* Start */
-		case 0x01FE:
-			//motor_on();
-			start_motor();
-			
-			heater_on();
-			break;
-			
-		/* Stop */
-		case 0x02FD:
-			//motor_off();
-			stop_motor();
-			
-			heater_off();
-			break;
-			
-		/* Pause and resume */
-		case 0x04FB:
-			break;
-			
-		/* Power off */
-		case 0x08F7:
-			//motor_off();
-			stop_motor();
-			
-			heater_off();
-			break;
-			
-		/* Heater on/off */
-		case 0x10EF:				
-			if (param == 0x0001) 
-			{
-				heater_on();
-			}
-			else if (param == 0x0000)
-			{
-				heater_off();
-			}
-			break;
-
-		/* Motor on/off */
-		case 0x20DF:				
-			if (param == 0x0001) 
-			{
-				//motor_on();
-				start_motor();
-			}
-			else if (param == 0x0000)
-			{
-				//motor_off();
-				stop_motor();
-			}
-			break;
-
-		/* Measure on/off */
-		case 0x40FB:				
-			if (param == 0x0001) 
-			{
-				m_pressure_out_flag = true;
-			}
-			else if (param == 0x0000)
-			{
-				m_pressure_out_flag = false;
-			}
-			break;
-
-		/* Vibration Pattern [pattern number] */
-		case 0x807F:				
-			set_pattern(param);
-			break;
-
-		/* Vibration Level */
-		case 0x817E:				
-			break;
-
-		default:
-			break;
-	}
-}
-
-static void bt_sent_cb(struct bt_conn *conn)
-{
-}
-
-static void bt_send_enabled_cb(int status)
-{
-}
-
-static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data, uint16_t len)
+static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
+			  uint16_t len)
 {
 	int err;
 	char addr[BT_ADDR_LE_STR_LEN] = {0};
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, ARRAY_SIZE(addr));
+
+	LOG_INF("Received data from: %s", addr);
 
 	for (uint16_t pos = 0; pos != len;) {
 		struct uart_data_t *tx = k_malloc(sizeof(*tx));
@@ -678,15 +493,11 @@ static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data, uint1
 		if (err) {
 			k_fifo_put(&fifo_uart_tx_data, tx);
 		}
-
-		app_handle(data, len);
 	}
 }
 
 static struct bt_nus_cb nus_cb = {
 	.received = bt_receive_cb,
-	.sent = bt_sent_cb,
-	.send_enabled = bt_send_enabled_cb,
 };
 
 void error(void)
@@ -747,177 +558,30 @@ static void configure_gpio(void)
 	}
 }
 
-#include <hal/nrf_twi.h>
-#include <hal/nrf_twim.h>
-#include <drivers/i2c.h>
-
-#define twi		DT_LABEL(DT_NODELABEL(i2c0))
-#define twi1	DT_LABEL(DT_NODELABEL(i2c1))
-
-struct device *dwi_dev;
-struct device *dwi1_dev;
-
-static uint8_t data_buff[32];
-
-void sensor_delay(uint32_t delay)
-{
-    k_sleep(K_MSEC(delay));
-}
-
-int read_sensor_data(uint8_t dev, uint8_t reg, uint8_t *buff, uint8_t cnt)
-{
-    return i2c_burst_read(dwi_dev, dev, reg, buff, cnt);
-}
-
-int write_sensor_data(uint8_t dev, uint8_t reg, uint8_t *buff, uint8_t cnt)
-{
-    return i2c_burst_write(dwi_dev, dev, reg, buff, cnt);
-}
-
-static void write_flash_data(uint8_t *data, int len)
-{
-	i2c_burst_write(dwi1_dev, 0x57, 0x00, data, len);
-
-	k_sleep(K_MSEC(4));
-}
-
-static void read_flash_data(uint8_t *buff, int len)
-{
-    i2c_burst_read(dwi1_dev, 0x57, 0x00, buff, len);
-}
-
-#include <drivers/pwm.h>
-
-#define pwm	DT_LABEL(DT_NODELABEL(pwm1))
-
-struct device *pwm_dev;
-
-#define PWM_PERIOD_US		(USEC_PER_SEC / 50U)
-#define PWM_PULSE_US		(1000U)
-
-void set_pattern(int p_no)
-{
-	switch (p_no)
-	{
-		case 0:
-			set_motor_pattern(0xffffffff, 0);
-			break;
-
-		case 1:
-			set_motor_pattern(MO_PATTERN_1_ON, MO_PATTERN_1_OFF);
-			break;
-
-		case 2:
-			set_motor_pattern(MO_PATTERN_2_ON, MO_PATTERN_2_OFF);
-			break;
-
-		case 3:
-			set_motor_pattern(MO_PATTERN_3_ON, MO_PATTERN_3_OFF);
-			break;
-
-		case 4:
-			set_motor_pattern(MO_PATTERN_4_ON, MO_PATTERN_4_OFF);
-			break;
-		
-		default:
-			break;
-	}
-}
-
-static void set_motor_pattern(uint32_t on, uint32_t off)
-{
-	m_motor_pattern_on = on;
-	
-	m_motor_pattern_off = off;
-}
-
-static void start_motor(void)
-{
-	motor_on();
-	
-	m_running_flag = true;
-
-	m_state_time = 0;
-	
-	m_motor_state = MOTOR_ON;
-}
-
-static void stop_motor(void)
-{
-	motor_off();
-	
-	m_running_flag = false;
-
-	m_state_time = 0;
-	
-	m_motor_state = MOTOR_OFF;
-}
-
-static void motor_proc(void)
-{
-	if (m_running_flag == true)
-	{
-		if (m_motor_state == MOTOR_ON)
-		{
-			if (++m_state_time > m_motor_pattern_on)
-			{
-				motor_off();
-				m_motor_state = MOTOR_OFF;
-				m_state_time = 0;
-			}
-		}
-		else
-		{
-			if (++m_state_time > m_motor_pattern_off)
-			{
-				motor_on();
-				m_motor_state = MOTOR_ON;
-				m_state_time = 0;
-			}
-		}
-	}
-}
-
 void main(void)
 {
 	int blink_status = 0;
 	int err = 0;
-	int flag = 0;
-	int pos;
-	int value;
-	uint8_t buff[32] = { 0x00, };
-	uint8_t data_buff[32];
-	int led_count = 0;
 
-	nrf_gpio_cfg_output(38);
-	
-	nrf_gpio_cfg_output(34);
-
-	nrf_gpio_cfg_output(14);
-	
-	nrf_gpio_pin_clear(14);
-	
-	stop_motor();
-
-	dwi_dev = device_get_binding(twi);
-
-	dwi1_dev = device_get_binding(twi1);
-
-	pwm_dev = device_get_binding(pwm);
+	configure_gpio();
 
 	err = uart_init();
 	if (err) {
 		error();
 	}
 
-	bmp180_data_readout_template();
-
-	read_flash_data(m_id, 4);
-
-	set_pattern(2);
-	
 	if (IS_ENABLED(CONFIG_BT_NUS_SECURITY_ENABLED)) {
-		bt_conn_auth_cb_register(&conn_auth_callbacks);
+		err = bt_conn_auth_cb_register(&conn_auth_callbacks);
+		if (err) {
+			printk("Failed to register authorization callbacks.\n");
+			return;
+		}
+
+		err = bt_conn_auth_info_cb_register(&conn_auth_info_callbacks);
+		if (err) {
+			printk("Failed to register authorization info callbacks.\n");
+			return;
+		}
 	}
 
 	err = bt_enable(NULL);
@@ -946,55 +610,9 @@ void main(void)
 		return;
 	}
 
-	m_pressure_out_flag = true;
-	
-	for (;;) 
-	{
-        if (led_count++ >= 5) 
-        {
-			if (flag)
-			{
-				nrf_gpio_pin_clear(38);
-				nrf_gpio_pin_clear(34);
-				flag = 0;
-			}
-			else
-			{
-				nrf_gpio_pin_set(38);
-				nrf_gpio_pin_set(34);
-				flag = 1;
-			}
-            led_count = 0;
-        }
-
-        if (current_conn != NULL)
-        {
-			if (m_pressure_out_flag)
-			{
-				value = bmp180_data_readout();
-				pos = 0;
-
-				data_buff[pos++] = 0x11;
-				data_buff[pos++] = 0xEE;
-				
-				data_buff[pos++] = (uint8_t)(value >> 3);
-				data_buff[pos++] = (uint8_t)(value >> 2);
-				data_buff[pos++] = (uint8_t)(value >> 1);
-				data_buff[pos++] = (uint8_t)(value >> 0);
-
-				value = ~value;
-				data_buff[pos++] = (uint8_t)(value >> 3);
-				data_buff[pos++] = (uint8_t)(value >> 2);
-				data_buff[pos++] = (uint8_t)(value >> 1);
-				data_buff[pos++] = (uint8_t)(value >> 0);
-				
-				bt_nus_send(current_conn, data_buff, pos);
-			}
-        }
-
-		motor_proc();
-		
-		k_sleep(K_MSEC(100));
+	for (;;) {
+		dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
+		k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 	}
 }
 

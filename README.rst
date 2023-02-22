@@ -15,14 +15,15 @@ Requirements
 
 The sample supports the following development kits:
 
-.. table-from-rows:: /includes/sample_board_rows.txt
-   :header: heading
-   :rows: nrf5340dk_nrf5340_cpuapp_and_cpuapp_ns, nrf52840dk_nrf52840, nrf52840dk_nrf52811, nrf52833dk_nrf52833, nrf52833dk_nrf52820, nrf52833dk_nrf52820, nrf52dk_nrf52832, nrf52dk_nrf52810, thingy53_nrf5340_cpuapp_and_cpuapp_ns, nrf21540dk_nrf52840
+.. table-from-sample-yaml::
+
+.. include:: /includes/tfm.txt
 
 .. note::
    * The boards ``nrf52dk_nrf52810``, ``nrf52840dk_nrf52811``, and ``nrf52833dk_nrf52820`` only support the `Minimal sample variant`_.
    * When used with :ref:`zephyr:thingy53_nrf5340`, the sample supports the MCUboot bootloader with serial recovery and SMP DFU over Bluetooth.
      Thingy:53 has no built-in SEGGER chip, so the UART 0 peripheral is not gated to a USB CDC virtual serial port.
+   * When used with :ref:`zephyr:nrf5340dk_nrf5340`, the sample might support the MCUboot bootloader with serial recovery of the networking core image.
 
 The sample also requires a smartphone or tablet running a compatible application.
 The `Testing`_ instructions refer to `nRF Connect for Mobile`_, but you can also use other similar applications (for example, `nRF Blinky`_ or `nRF Toolbox`_).
@@ -61,6 +62,8 @@ If you want to view the debug messages, follow the procedure in :ref:`testing_rt
 .. note::
    On the Thingy:53, debug logs are provided over the USB CDC ACM class serial port, instead of using RTT.
 
+For more information about debugging in the |NCS|, see :ref:`gs_debugging`.
+
 FEM support
 ***********
 
@@ -82,11 +85,25 @@ USB CDC ACM extension
 =====================
 
 For the boards with the USB device peripheral, you can build the sample with support for the USB CDC ACM class serial port instead of the physical UART.
-This build uses the UART async adapter module that acts as a bridge between the USB CDC ACM and the default sample configuration.
-The USB CDC ACM provides only the interrupt interface and the default sample configuration uses the UART async API.
+This build uses the sample-specific UART async adapter module that acts as a bridge between USB CDC ACM and Zephyr's UART asynchronous API used by the sample.
+See :ref:`peripheral_uart_sample_activating_variants` for details about how to build the sample with this extension using the :file:`prj_cdc.conf`.
 
+Async adapter experimental module
+---------------------------------
+
+The default sample configuration uses the UART async API, which is an :ref:`experimental <software_maturity>` module.
+The UART async adapter creates and initializes an instance of the async module.
+This is needed because the USB CDC ACM implementation provides only the interrupt interface.
+The adapter uses data provided in the :c:struct:`uart_async_adapter_data` to connect to the UART device that does not use the asynchronous interface.
+
+The module requires the :kconfig:option:`CONFIG_BT_NUS_UART_ASYNC_ADAPTER` to be set to ``y``.
 For more information about the adapter, see the :file:`uart_async_adapter` source files available in the :file:`peripheral_uart/src` directory.
-See :ref:`peripheral_uart_sample_activating_variants` for details about how to build the sample with this extension.
+
+MCUboot with serial recovery of the networking core image
+=========================================================
+
+For the ``nrf5340dk_nrf5340_cpuapp``, it is possible to enable serial recovery of the network core while multi-image update is not enabled in the MCUboot.
+See :ref:`peripheral_uart_sample_activating_variants` for details on how to build the sample with this feature using the :file:`nrf5340dk_app_sr_net.conf` and :file:`nrf5340dk_mcuboot_sr_net.conf` files.
 
 User interface
 **************
@@ -126,7 +143,7 @@ Building and running
 
 .. |sample path| replace:: :file:`samples/bluetooth/peripheral_uart`
 
-.. include:: /includes/build_and_run.txt
+.. include:: /includes/build_and_run_ns.txt
 
 .. _peripheral_uart_sample_activating_variants:
 
@@ -136,7 +153,10 @@ Activating sample extensions
 To activate the optional extensions supported by this sample, modify :makevar:`OVERLAY_CONFIG` in the following manner:
 
 * For the minimal build variant, set :file:`prj_minimal.conf`.
-* For the USB CDC ACM extension, set :file:`prj_cdc.conf`. Additionally, you need to set :makevar:`DTC_OVERLAY_FILE` to :file:`usb.overlay`.
+* For the USB CDC ACM extension, set :file:`prj_cdc.conf`.
+  Additionally, you need to set :makevar:`DTC_OVERLAY_FILE` to :file:`usb.overlay`.
+* For the MCUboot with serial recovery of the networking core image feature, set the :file:`nrf5340dk_app_sr_net.conf` file.
+  You also need to set the :makevar:`mcuboot_OVERLAY_CONFIG` variant to :file:`nrf5340dk_mcuboot_sr_net.conf`.
 
 See :ref:`cmake_options` for instructions on how to add this option.
 For more information about using configuration overlay files, see :ref:`zephyr:important-build-vars` in the Zephyr documentation.
@@ -154,7 +174,7 @@ After programming the sample to your development kit, complete the following ste
 #. |connect_terminal|
 #. Optionally, you can display debug messages. See :ref:`peripheral_uart_debug` for details.
 #. Reset the kit.
-#. Observe that **LED 1** is blinking and that the device is advertising with the device name that is configured in :kconfig:`CONFIG_BT_DEVICE_NAME`.
+#. Observe that **LED 1** is blinking and that the device is advertising with the device name that is configured in :kconfig:option:`CONFIG_BT_DEVICE_NAME`.
 #. Observe that the text "Starting Nordic UART service example" is printed on the COM listener running on the computer.
 #. Connect to the device using nRF Connect for Mobile.
    Observe that **LED 2** is on.
@@ -175,6 +195,10 @@ After programming the sample to your development kit, complete the following ste
 Dependencies
 ************
 
+This sample uses the following sample-specific library:
+
+* :file:`uart_async_adapter` at :file:`peripheral_uart/src`
+
 This sample uses the following |NCS| libraries:
 
 * :ref:`nus_service_readme`
@@ -190,7 +214,7 @@ In addition, it uses the following Zephyr libraries:
 
 * :ref:`zephyr:api_peripherals`:
 
-   * ``incude/gpio.h``
+   * ``include/gpio.h``
    * ``include/uart.h``
 
 * :ref:`zephyr:bluetooth_api`:
@@ -199,3 +223,7 @@ In addition, it uses the following Zephyr libraries:
   * ``include/bluetooth/gatt.h``
   * ``include/bluetooth/hci.h``
   * ``include/bluetooth/uuid.h``
+
+The sample also uses the following secure firmware component:
+
+* :ref:`Trusted Firmware-M <ug_tfm>`
