@@ -293,9 +293,20 @@ void button_changed(uint32_t button_state, uint32_t has_changed)
 }
 #endif /* CONFIG_BT_NUS_SECURITY_ENABLED */
 
+#include <hal/nrf_gpio.h>
+#define STAT1_PIN   43
+#define STAT2_PIN   44
+#define AC_PG_PIN   45
+#define USB_PG_PIN  46
+
 static void configure_gpio(void)
 {
 	int err;
+
+    nrf_gpio_cfg_input(STAT1_PIN, GPIO_PIN_CNF_PULL_Pullup);
+    nrf_gpio_cfg_input(STAT2_PIN, GPIO_PIN_CNF_PULL_Pullup);
+    nrf_gpio_cfg_input(AC_PG_PIN, GPIO_PIN_CNF_PULL_Pullup);
+    nrf_gpio_cfg_input(USB_PG_PIN, GPIO_PIN_CNF_PULL_Pullup);
 
 #ifdef CONFIG_BT_NUS_SECURITY_ENABLED
 	err = dk_buttons_init(button_changed);
