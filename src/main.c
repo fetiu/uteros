@@ -90,7 +90,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	current_conn = bt_conn_ref(conn);
 
-	dk_set_led_on(CON_STATUS_LED);
+	// dk_set_led_on(CON_STATUS_LED);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -310,12 +310,27 @@ static void configure_gpio(void)
 	}
 }
 
+int measure_handler(ProtocolDataUnit *pdu)
+{
+    return 0;
+}
+
 void main(void)
 {
 	int blink_status = 0;
 	int err = 0;
 
 	configure_gpio();
+    DeviceIdentification_init();
+    OperationCommand_init();
+    SettingCommand_init();
+    Protocol_set_handler(
+        COMMAND_MEASURED_DATA, 
+        &(ProtocolHandler) {
+            .command = 0x11EE,
+            .handler = measure_handler
+        }
+    );
 
 	if (IS_ENABLED(CONFIG_BT_NUS_SECURITY_ENABLED)) {
 		err = bt_conn_auth_cb_register(&conn_auth_callbacks);
@@ -381,26 +396,10 @@ void stop_measure(void)
     k_timer_stop(&measure_timer);
 }
 
-int measure_handler(ProtocolDataUnit *pdu)
-{
-    return 0;
-}
-
 void ble_write_thread(void)
 {
 	/* Don't go any further until BLE is initialized */
 	k_sem_take(&ble_init_ok, K_FOREVER);
-
-    DeviceIdentification_init();
-    OperationCommand_init();
-    SettingCommand_init();
-    Protocol_set_handler(
-        COMMAND_MEASURED_DATA, 
-        &(ProtocolHandler) {
-            .command = 0x11EE,
-            .handler = measure_handler
-        }
-    );
 
 	for (;;) {
 		/* Wait indefinitely for data to be sent over bluetooth */
