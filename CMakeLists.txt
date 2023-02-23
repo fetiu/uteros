@@ -15,8 +15,12 @@ target_sources(app PRIVATE
   src/device_identification.c
   src/operation_command.c
   src/setting_command.c
+  src/setting_command.c
+  src/pressure_sensor.c
+  deps/BMP180_driver/bmp180.c
 )
 
 # NORDIC SDK APP END
 
 zephyr_library_include_directories(.)
+zephyr_library_include_directories(deps)

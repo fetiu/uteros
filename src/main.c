@@ -321,6 +321,8 @@ static void configure_gpio(void)
 	}
 }
 
+extern void PressureSensor_init(void);
+
 int measure_handler(ProtocolDataUnit *pdu)
 {
     return 0;
@@ -332,6 +334,7 @@ void main(void)
 	int err = 0;
 
 	configure_gpio();
+    PressureSensor_init();
     DeviceIdentification_init();
     OperationCommand_init();
     SettingCommand_init();
@@ -389,10 +392,14 @@ void main(void)
 	}
 }
 
+extern uint8_t PressureSensor_read(void);
+
 void measure(struct k_timer *dummy)
 {
-    uint8_t data[] = {0x11, 0xEE, 0x30, 0xCF};
-    bt_receive_cb(NULL, data, sizeof(data));
+    uint8_t data = PressureSensor_read();
+
+    uint8_t command[] = {0x11, 0xEE, data, ~data};
+    bt_receive_cb(NULL, command, sizeof(data));
 }
 
 K_TIMER_DEFINE(measure_timer, measure, NULL);

@@ -5,6 +5,20 @@
  */
 
 / {
+    soc {
+        i2c0: i2c@40003000 {
+			compatible = "nordic,nrf-twim";
+			#address-cells = < 0x1 >;
+			#size-cells = < 0x0 >;
+			reg = < 0x40003000 0x1000 >;
+			clock-frequency = < 0x186a0 >;
+			interrupts = < 0x3 0x1 >;
+			status = "okay";
+			label = "I2C_0";
+			sda-pin = < 0xc >;
+			scl-pin = < 0xb >;
+		};
+    };
 	chosen {
 		nordic,nus-uart = &uart0;
 	};
