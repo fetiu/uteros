@@ -13,6 +13,7 @@
 #define ASSERT(expr) if (expr) __BKPT(0)
 
 static const struct device *i2c_dev;
+uint32_t pressure, temperature;
 
 void BMP180_delay_msek(uint32_t msek)
 {
@@ -36,19 +37,28 @@ static struct bmp180_t bmp180 = {
     .delay_msec = BMP180_delay_msek,
 };
 
+static void read_sensor(struct k_work *work)
+{
+    u32 v_uncomp_press_u32 = bmp180_get_uncomp_pressure();
+    pressure = bmp180_get_pressure(v_uncomp_press_u32);
+    
+    u16 v_uncomp_temp_u16 = bmp180_get_uncomp_temperature();
+    temperature = bmp180_get_temperature(v_uncomp_temp_u16);
+}
+
+K_WORK_DEFINE(work, read_sensor);
+
 void PressureSensor_init(void)
 {
     i2c_dev = DEVICE_DT_GET(I2C_NAME);
     while(!device_is_ready(i2c_dev));
     ASSERT(i2c_configure(i2c_dev, I2C_CFG));
-    
     ASSERT(bmp180_init(&bmp180));
-    ASSERT(bmp180_get_calib_param());
 }
 
 uint8_t PressureSensor_read(void)
 {
-    u32 v_uncomp_press_u32 = bmp180_get_uncomp_pressure();
+    k_work_submit(&work);
 
-    return (uint8_t) bmp180_get_pressure(v_uncomp_press_u32);
+    return (uint8_t) pressure;
 }
