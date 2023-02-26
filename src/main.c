@@ -334,10 +334,9 @@ void main(void)
 	int err = 0;
 
 	configure_gpio();
-    PressureSensor_init();
-    DeviceIdentification_init();
-    OperationCommand_init();
     SettingCommand_init();
+    OperationCommand_init();
+    DeviceIdentification_init();
     Protocol_set_handler(
         COMMAND_MEASURED_DATA, 
         &(ProtocolHandler) {
@@ -345,6 +344,7 @@ void main(void)
             .handler = measure_handler
         }
     );
+    PressureSensor_init();
 
 	if (IS_ENABLED(CONFIG_BT_NUS_SECURITY_ENABLED)) {
 		err = bt_conn_auth_cb_register(&conn_auth_callbacks);

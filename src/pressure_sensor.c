@@ -8,9 +8,11 @@
 #include <zephyr/drivers/i2c.h>
 #include <BMP180_driver/bmp180.h>
 
-#define I2C_NAME DT_LABEL(DT_NODELABEL(i2c0))
+#define I2C_NAME DT_NODELABEL(i2c0)
+#define I2C_CFG (I2C_SPEED_SET(I2C_SPEED_FAST) | I2C_MODE_CONTROLLER)
+#define ASSERT(expr) if (expr) __BKPT(0)
 
-static struct device *i2c_dev;
+static const struct device *i2c_dev;
 
 void BMP180_delay_msek(uint32_t msek)
 {
@@ -36,15 +38,11 @@ static struct bmp180_t bmp180 = {
 
 void PressureSensor_init(void)
 {
-   	i2c_dev = device_get_binding(I2C_NAME);
-    
-    s32 com_rslt = E_BMP_COMM_RES;
-
-    com_rslt = bmp180_init(&bmp180);
-    com_rslt += bmp180_get_calib_param();
-    if (com_rslt) {
-        printf("error\n");
-    }
+    i2c_dev = DEVICE_DT_GET(I2C_NAME);
+    ASSERT(device_is_ready(i2c_dev));
+    ASSERT(i2c_configure(i2c_dev, I2C_CFG));
+    ASSERT(bmp180_init(&bmp180));
+    ASSERT(bmp180_get_calib_param());
 }
 
 uint8_t PressureSensor_read(void)
