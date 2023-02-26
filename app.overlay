@@ -8,6 +8,10 @@
 	chosen {
 		nordic,nus-uart = &uart0;
 	};
+
+    buttons {
+        status = "disabled"; /* to avoid  */
+    };
 };
 
 &i2c0 {
