@@ -39,8 +39,9 @@ static struct bmp180_t bmp180 = {
 void PressureSensor_init(void)
 {
     i2c_dev = DEVICE_DT_GET(I2C_NAME);
-    ASSERT(device_is_ready(i2c_dev));
+    while(!device_is_ready(i2c_dev));
     ASSERT(i2c_configure(i2c_dev, I2C_CFG));
+    
     ASSERT(bmp180_init(&bmp180));
     ASSERT(bmp180_get_calib_param());
 }
