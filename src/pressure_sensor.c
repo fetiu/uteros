@@ -63,9 +63,9 @@ uint8_t PressureSensor_read(void)
 {
     k_work_submit(&work);
 
-    // Typically around 103500 Pa
-    // calculates 103500 to 035 to fit 8 bit
-    return (uint8_t)(pressure / 100 % 1000);
+    // Typically around 103,000 Pa (above 90,000)
+    // convert 103,000 to 13 to fit in UINT8_MAX
+    return MIN(pressure / 1000 - 90, UINT8_MAX);
 }
 
 float PressureSensor_temp(void)

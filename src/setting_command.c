@@ -10,30 +10,45 @@ static ProtocolHandler set_heater_handler, set_motor_handler;
 static ProtocolHandler set_measure_handler, set_pattern_hander, set_level_hander;
 static bool is_heating, is_vibrating, is_measuring, is_over_level = true;
 static enum {PATTERN1, PATTERN2, PATTERN3, PATTERN4, PATTERN5} pattern;
-static uint8_t vibration_level = 40;
+static uint8_t vibration_level;
 
-static void limit(struct k_timer *dummy)
+extern uint8_t PressureSensor_read(void);
+
+void reserve(struct k_timer *timer, k_timeout_t timeout)
+{
+    k_timer_start(timer, timeout, K_NO_WAIT);
+}
+
+static void heater(struct k_timer *dummy)
 {
     extern float PressureSensor_temp(void);
+    if (PressureSensor_temp() < 36.5) {
+        nrf_gpio_pin_set(HEATER_PIN);
+    }
     if (PressureSensor_temp() > 40) {
         nrf_gpio_pin_clear(HEATER_PIN);
     }
-
-    if (PressureSensor_temp() < 30) {
-        nrf_gpio_pin_set(HEATER_PIN);
-    }
 }
 
-K_TIMER_DEFINE(heater_timer, limit, NULL);
+K_TIMER_DEFINE(heater_timer, heater, NULL);
 
-void heater_mode(void)
+void stop_heater(void)
 {
-    k_timer_start(&heater_timer, K_MSEC(0), K_MSEC(1000));
-}
-
-void heater_stop(void)
-{
+    is_heating = false;
     nrf_gpio_pin_set(HEATER_PIN);
+    k_timer_stop(&heater_timer);
+}
+
+K_TIMER_DEFINE(heater_end_timer, (k_timer_expiry_t)stop_heater, NULL);
+
+void start_heater(void)
+{
+    is_heating = true;
+    k_timer_start(&heater_timer, K_MSEC(0), K_SECONDS(1));
+    k_timer_stop(&heater_end_timer);
+    if (!is_measuring && !is_vibrating) {
+        reserve(&heater_end_timer, K_MINUTES(15));
+    }
 }
 
 int set_heater(ProtocolDataUnit *pdu)
@@ -45,11 +60,10 @@ int set_heater(ProtocolDataUnit *pdu)
     if (on_off > 0x0001) {
         return -2;
     }
-    is_heating = (bool)on_off;
-    if (is_heating) {
-        heater_mode();
+    if (on_off) {
+        start_heater();
     } else {
-	    nrf_gpio_pin_clear(HEATER_PIN);
+        stop_heater();
     }
     return 0;
 }
@@ -58,7 +72,8 @@ static void motor(struct k_timer *dummy)
 {
     static uint32_t cnt = 0;
 
-    if (cnt++ % 6 >= pattern) {
+    uint8_t duty = cnt++ % 5;
+    if (duty < pattern || duty == MIN(pattern + 1, PATTERN5)) {
         nrf_gpio_pin_set(MOTOR_PIN);
     } else {
         nrf_gpio_pin_clear(MOTOR_PIN);
@@ -67,27 +82,63 @@ static void motor(struct k_timer *dummy)
 
 K_TIMER_DEFINE(motor_timer, motor, NULL);
 
-void MotorPattern_run(bool enable)
+void start_motor(void)
 {
-    if (!enable) {
-        nrf_gpio_pin_clear(MOTOR_PIN);
-        return;
-    }
-    
-    k_timer_start(&heater_timer, K_MSEC(0), K_MSEC(1000));
+    k_timer_start(&motor_timer, K_MSEC(0), K_MSEC(25));
 }
 
-void vibration_mode(void)
+void stop_motor(void)
 {
-    extern uint8_t PressureSensor_read(void);
+    nrf_gpio_pin_clear(MOTOR_PIN);
+    k_timer_stop(&motor_timer);
+}
+
+K_TIMER_DEFINE(motor_end_timer, (k_timer_expiry_t)stop_motor, NULL);
+
+static void vibration(struct k_timer *dummy)
+{
     uint8_t data = PressureSensor_read();
-    
-    if (is_over_level) {
-        MotorPattern_run(data > vibration_level);
-    } else {
-        MotorPattern_run(data < vibration_level);
+
+    bool should_vibrate = (data > vibration_level);
+    if (!is_over_level) {
+        should_vibrate = !should_vibrate;
     }
-} 
+    if (should_vibrate) {
+        start_motor();
+        reserve(&motor_end_timer, K_SECONDS(10));
+    }
+}
+
+K_TIMER_DEFINE(vibration_timer, vibration, NULL);
+
+void stop_vibration(void)
+{
+    is_vibrating = false;
+    k_timer_stop(&vibration_timer);
+    stop_motor();
+}
+
+K_TIMER_DEFINE(vibration_end_timer, (k_timer_expiry_t)stop_vibration, NULL);
+
+void start_vibration(void)
+{
+    is_vibrating = true;
+    if (vibration_level == 0) {
+        vibration_level = PressureSensor_read() + 10;
+    }
+    if (is_measuring) {
+        stop_motor();
+        k_timer_start(&vibration_timer, K_MSEC(0), K_MSEC(500));
+    } else {
+        k_timer_stop(&vibration_timer);
+        start_motor();
+    }
+    k_timer_stop(&motor_end_timer);
+    k_timer_stop(&vibration_end_timer);
+    if (!is_measuring && !is_heating) {
+        reserve(&vibration_end_timer, K_MINUTES(5));
+    }
+}
 
 int set_motor(ProtocolDataUnit *pdu)
 {
@@ -98,13 +149,35 @@ int set_motor(ProtocolDataUnit *pdu)
     if (on_off > 0x0001) {
         return -2;
     }
-    is_vibrating = (bool)on_off;
-    if (is_vibrating) {
-	    MotorPattern_run(true);
+    if (on_off) {
+        stop_measure(); // for UX
+        start_vibration();
     } else {
-	    MotorPattern_run(false);
+	    stop_vibration();
     }
     return 0;
+}
+
+extern void measure(struct k_timer *dummy);
+
+K_TIMER_DEFINE(measure_timer, measure, NULL);
+
+void stop_measure(void)
+{
+    is_measuring = false;
+    k_timer_stop(&measure_timer);
+}
+
+K_TIMER_DEFINE(measure_end_timer, (k_timer_expiry_t)stop_measure, NULL);
+
+void start_measure(void)
+{
+    is_measuring = true;
+    k_timer_start(&measure_timer, K_MSEC(0), K_MSEC(200));
+    k_timer_stop(&measure_end_timer);
+    if (!is_vibrating && !is_heating) {
+        reserve(&measure_end_timer, K_MINUTES(15));
+    }
 }
 
 int set_measure(ProtocolDataUnit *pdu)
@@ -116,12 +189,9 @@ int set_measure(ProtocolDataUnit *pdu)
     if (on_off > 0x0001) {
         return -2;
     }
-    is_measuring = (bool)on_off;
-    if (is_measuring) {
-        extern void start_measure(void);
+    if (on_off) {
         start_measure();
     } else {
-        extern void stop_measure(void);
         stop_measure();
     }
     return 0;

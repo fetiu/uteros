@@ -197,6 +197,15 @@ static void configure_gpio(void)
 
 extern void PressureSensor_init(void);
 
+void measure(struct k_timer *dummy)
+{
+	extern uint8_t PressureSensor_read(void);
+    uint8_t data = PressureSensor_read();
+
+    uint8_t command[] = {0x11, 0xEE, data, ~data};
+    bt_receive_cb(NULL, command, sizeof(command));
+}
+
 int measure_handler(ProtocolDataUnit *pdu)
 {
     return 0;
@@ -209,8 +218,6 @@ void main(void)
 
 	configure_gpio();
     SettingCommand_init();
-    OperationCommand_init();
-    DeviceIdentification_init();
     Protocol_set_handler(
         COMMAND_MEASURED_DATA,
         &(ProtocolHandler) {
@@ -219,6 +226,8 @@ void main(void)
         }
     );
     PressureSensor_init();
+    OperationCommand_init();
+    DeviceIdentification_init();
 
 	err = bt_enable(NULL);
 	if (err) {
@@ -250,27 +259,6 @@ void main(void)
 		dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
 		k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
 	}
-}
-
-void measure(struct k_timer *dummy)
-{
-	extern uint8_t PressureSensor_read(void);
-    uint8_t data = PressureSensor_read();
-
-    uint8_t command[] = {0x11, 0xEE, data, ~data};
-    bt_receive_cb(NULL, command, sizeof(command));
-}
-
-K_TIMER_DEFINE(measure_timer, measure, NULL);
-
-void start_measure(void)
-{
-    k_timer_start(&measure_timer, K_MSEC(0), K_MSEC(33));
-}
-
-void stop_measure(void)
-{
-    k_timer_stop(&measure_timer);
 }
 
 void ble_write_thread(void)
