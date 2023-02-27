@@ -95,17 +95,22 @@ void stop_motor(void)
 
 K_TIMER_DEFINE(motor_end_timer, (k_timer_expiry_t)stop_motor, NULL);
 
-static void vibration(struct k_timer *dummy)
+static void vibration(struct k_timer *timer)
 {
     uint8_t data = PressureSensor_read();
 
-    bool should_vibrate = (data > vibration_level);
-    if (!is_over_level) {
-        should_vibrate = !should_vibrate;
-    }
-    if (should_vibrate) {
-        start_motor();
-        reserve(&motor_end_timer, K_SECONDS(10));
+    if (is_over_level) {
+        if (data >= vibration_level) {
+            start_motor();
+            reserve(&motor_end_timer, K_SECONDS(10));
+        }
+    } else {    
+        if (data < vibration_level) {
+            start_motor();
+        } else {
+            stop_motor();
+            k_timer_start(timer, K_SECONDS(10), K_MSEC(500)); 
+        }
     }
 }
 
