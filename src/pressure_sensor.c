@@ -13,7 +13,8 @@
 #define ASSERT(expr) if (expr) __BKPT(0)
 
 static const struct device *i2c_dev;
-uint32_t pressure, temperature;
+uint32_t pressure;
+float temperature;
 
 void BMP180_delay_msek(uint32_t msek)
 {
@@ -44,6 +45,7 @@ static void read_sensor(struct k_work *work)
     
     u16 v_uncomp_temp_u16 = bmp180_get_uncomp_temperature();
     temperature = bmp180_get_temperature(v_uncomp_temp_u16);
+    temperature /= 10;
 }
 
 K_WORK_DEFINE(work, read_sensor);
@@ -54,11 +56,15 @@ void PressureSensor_init(void)
     while(!device_is_ready(i2c_dev));
     ASSERT(i2c_configure(i2c_dev, I2C_CFG));
     ASSERT(bmp180_init(&bmp180));
+    ASSERT(bmp180_get_calib_param());
+    read_sensor(&work);
 }
 
 uint8_t PressureSensor_read(void)
 {
     k_work_submit(&work);
 
-    return (uint8_t) pressure;
+    // Typically around 103500 Pa
+    // calculates 103500 to 035 to fit 8 bit
+    return (uint8_t)(pressure / 100 % 1000);
 }
