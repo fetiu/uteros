@@ -7,8 +7,24 @@ static ProtocolHandler pause_resume_handler, power_off_handler;
 
 bool is_paused = false;
 
+extern void MotorPattern_run(bool enable);
+extern void stop_measure(void);
+extern void heater_stop(void);
+
+static void default_operation_mode(void)
+{
+    extern void vibration_mode(void);
+    extern void heater_mode(void);
+    extern void start_measure(void);
+
+    vibration_mode();
+    start_measure();
+    heater_mode();
+}
+
 int start(ProtocolDataUnit *pdu)
 {
+    default_operation_mode();
     if (pdu->command != start_handler.command) {
         return -1;
     }
@@ -17,6 +33,9 @@ int start(ProtocolDataUnit *pdu)
 
 int stop(ProtocolDataUnit *pdu)
 {
+    MotorPattern_run(false);
+    stop_measure();
+    heater_stop();
     if (pdu->command != stop_handler.command) {
         return -1;
     }
@@ -29,6 +48,13 @@ int pause_resume(ProtocolDataUnit *pdu)
         return -1;
     }
     is_paused = !is_paused;
+    if (is_paused) {
+        default_operation_mode();
+    } else {
+        MotorPattern_run(false);
+        stop_measure();
+        heater_stop(); 
+    }
     return 0;
 }
 
