@@ -10,7 +10,17 @@ static ProtocolHandler set_heater_handler, set_motor_handler;
 static ProtocolHandler set_measure_handler, set_pattern_hander, set_level_hander;
 static bool is_heating, is_vibrating, is_measuring, is_over_level = true;
 static enum {PATTERN1, PATTERN2, PATTERN3, PATTERN4, PATTERN5} pattern;
-static uint8_t vibration_level;
+static uint8_t vibration_level = 40;
+
+static void limit(struct k_timer *dummy)
+{
+    extern float PressureSensor_temp(void);
+    if (PressureSensor_temp() > 40) {
+        nrf_gpio_pin_clear(HEATER_PIN);
+    }
+}
+
+K_TIMER_DEFINE(heater_timer, limit, NULL);
 
 int set_heater(ProtocolDataUnit *pdu)
 {
@@ -23,7 +33,8 @@ int set_heater(ProtocolDataUnit *pdu)
     }
     is_heating = (bool)on_off;
     if (is_heating) {
-	    nrf_gpio_pin_set(HEATER_PIN);
+        nrf_gpio_pin_set(HEATER_PIN);
+        k_timer_start(&heater_timer, K_MSEC(0), K_MSEC(1000));
     } else {
 	    nrf_gpio_pin_clear(HEATER_PIN);
     }

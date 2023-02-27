@@ -252,10 +252,9 @@ void main(void)
 	}
 }
 
-extern uint8_t PressureSensor_read(void);
-
 void measure(struct k_timer *dummy)
 {
+	extern uint8_t PressureSensor_read(void);
     uint8_t data = PressureSensor_read();
 
     uint8_t command[] = {0x11, 0xEE, data, ~data};
