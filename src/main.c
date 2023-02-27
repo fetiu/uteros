@@ -118,9 +118,6 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.disconnected = disconnected,
 };
 
-static struct bt_conn_auth_cb conn_auth_callbacks;
-static struct bt_conn_auth_info_cb conn_auth_info_callbacks;
-
 static void bt_receive_cb(struct bt_conn *conn, const uint8_t *const data,
 			  uint16_t len)
 {
@@ -215,7 +212,7 @@ void main(void)
     OperationCommand_init();
     DeviceIdentification_init();
     Protocol_set_handler(
-        COMMAND_MEASURED_DATA, 
+        COMMAND_MEASURED_DATA,
         &(ProtocolHandler) {
             .command = 0x11EE,
             .handler = measure_handler
@@ -262,7 +259,7 @@ void measure(struct k_timer *dummy)
     uint8_t data = PressureSensor_read();
 
     uint8_t command[] = {0x11, 0xEE, data, ~data};
-    bt_receive_cb(NULL, command, sizeof(data));
+    bt_receive_cb(NULL, command, sizeof(command));
 }
 
 K_TIMER_DEFINE(measure_timer, measure, NULL);
